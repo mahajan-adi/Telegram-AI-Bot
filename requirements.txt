@@ -2,3 +2,4 @@ pyTelegramBotAPI
 huggingface-hub
 flask
 opencv-python-headless
+gunicorn
