@@ -48,11 +48,9 @@ def handle_start(message):
 def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
-        # Using a supported model and specifying a provider for the Serverless API
+        # Changed to a supported free-tier model 
         response = hf_client.chat_completion(
-            model="Qwen/Qwen2.5-7B-Instruct",
-            # We add provider="together" to ensure it routes correctly through the free inference tier
-            provider="together", 
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
             messages=[
                 {
                     "role": "system",
@@ -69,7 +67,7 @@ def handle_text(message):
         )
         raw_reply = response.choices[0].message.content
         
-        # Remove internal thinking block if present (just in case the model outputs it)
+        # Remove internal thinking block if present
         if "</think>" in raw_reply:
             reply_text = raw_reply.split("</think>")[-1].strip()
         else:
