@@ -32,9 +32,11 @@ hf_client = InferenceClient(token=HF_TOKEN, provider="auto")
 # it, and update the provider/model below to match.
 CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                    # served by Together AI
 VISION_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct"  # served by Novita / Nscale
-VISION_PROVIDER = "novita"
 ASR_MODEL = "openai/whisper-large-v3"                      # served by fal-ai
-ASR_PROVIDER = "fal-ai"
+# Note: provider is set once on the InferenceClient above (provider="auto").
+# Older huggingface_hub versions don't accept a per-call `provider=` kwarg on
+# chat_completion()/automatic_speech_recognition(), so we rely on "auto" to
+# pick the right one of your enabled providers for each model.
 
 # --- Helper Functions ---
 def save_telegram_file(file_id, suffix):
@@ -93,7 +95,6 @@ def caption_image(image_path):
 
     response = hf_client.chat_completion(
         model=VISION_MODEL,
-        provider=VISION_PROVIDER,
         messages=[
             {
                 "role": "user",
@@ -170,9 +171,7 @@ def handle_audio(message):
     try:
         file_id = message.voice.file_id if message.voice else message.audio.file_id
         temp_path = save_telegram_file(file_id, ".ogg")
-        result = hf_client.automatic_speech_recognition(
-            temp_path, model=ASR_MODEL, provider=ASR_PROVIDER
-        )
+        result = hf_client.automatic_speech_recognition(temp_path, model=ASR_MODEL)
         safe_reply(message, f"🎙️ **Transcription:**\n\"{result.text}\"")
     except Exception as e:
         print(f"Audio Processing Error: {e}")
