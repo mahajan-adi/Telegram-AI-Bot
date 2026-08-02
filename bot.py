@@ -48,9 +48,9 @@ def handle_start(message):
 def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
-        # Changed to a supported free-tier model 
+        # Using a supported free-tier model
         response = hf_client.chat_completion(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="google/gemma-2-2b-it", 
             messages=[
                 {
                     "role": "system",
