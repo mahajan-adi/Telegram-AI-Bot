@@ -23,16 +23,16 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
 # provider="auto" lets HF pick whichever enabled provider serves the model.
 # Make sure providers are enabled at https://huggingface.co/settings/inference-providers
-hf_client = InferenceClient(token=HF_TOKEN, provider="auto")
+hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 
 # --- Model choices ---
 # These are models that are actually live on Inference Providers as of this
 # writing. If one of them stops working, check the model's page on
 # huggingface.co -> "Inference Providers" tab to see what's currently hosting
 # it, and update the provider/model below to match.
-CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                    # served by Together AI
-VISION_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct"  # served by Novita / Nscale
-ASR_MODEL = "openai/whisper-large-v3"                      # served by fal-ai
+CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                # served by Together AI
+VISION_MODEL = "moonshotai/Kimi-K3"                    # served by Together AI (note: very large model, expect slower responses)
+ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"                      # served by DeepInfra
 # Note: provider is set once on the InferenceClient above (provider="auto").
 # Older huggingface_hub versions don't accept a per-call `provider=` kwarg on
 # chat_completion()/automatic_speech_recognition(), so we rely on "auto" to
