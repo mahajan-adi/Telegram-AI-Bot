@@ -37,14 +37,6 @@ def get_main_menu_keyboard():
     markup.add(btn_chat, btn_vision, btn_audio, btn_video)
     return markup
 
-def get_response_action_keyboard():
-    """Appends quick-action buttons under AI responses."""
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_simplify = types.InlineKeyboardButton("💡 Simplify", callback_data="action_simplify")
-    btn_menu = types.InlineKeyboardButton("🏠 Main Menu", callback_data="action_main_menu")
-    markup.add(btn_simplify, btn_menu)
-    return markup
-
 # --- Helper Functions ---
 def save_telegram_file(file_id, suffix):
     """Downloads a file from Telegram servers to a local temporary file."""
@@ -123,14 +115,7 @@ def handle_callback_query(call):
     # Acknowledge the callback to remove the loading spinner
     bot.answer_callback_query(call.id)
 
-    if call.data == "action_main_menu":
-        bot.send_message(
-            call.message.chat.id, 
-            "🏠 <b>Main Menu</b>\nSelect an option below:", 
-            parse_mode="HTML", 
-            reply_markup=get_main_menu_keyboard()
-        )
-    elif call.data == "action_chat_help":
+    if call.data == "action_chat_help":
         safe_reply(call.message, "💬 <b>AI Chat:</b> Type any prompt or question in the chat, and I'll respond instantly!")
     elif call.data == "action_vision_help":
         safe_reply(call.message, "📸 <b>Vision Mode:</b> Send or forward any photo, and I'll generate a description for you.")
@@ -138,23 +123,6 @@ def handle_callback_query(call):
         safe_reply(call.message, "🎙️ <b>Speech-to-Text:</b> Send a voice note or audio file, and I will transcribe it.")
     elif call.data == "action_video_help":
         safe_reply(call.message, "🎬 <b>Video Analysis:</b> Send a short video clip, and I will extract and describe a keyframe.")
-    elif call.data == "action_simplify":
-        # Extract the text from the bot's own message that the button was attached to
-        if call.message and call.message.text:
-            text_to_simplify = call.message.text
-            bot.send_chat_action(call.message.chat.id, "typing")
-            try:
-                response = hf_client.chat_completion(
-                    model=CHAT_MODEL,
-                    messages=[
-                        {"role": "system", "content": "Explain the following topic in simple terms for a 10-year-old using bullet points and emojis."},
-                        {"role": "user", "content": text_to_simplify}
-                    ],
-                    max_tokens=500
-                )
-                safe_reply(call.message, f"💡 <b>Simplified Explanation:</b>\n\n{response.choices[0].message.content.strip()}", reply_markup=get_response_action_keyboard())
-            except Exception as e:
-                safe_reply(call.message, f"⚠️ Error simplifying text: {e}")
 
 # --- Content Handlers ---
 @bot.message_handler(func=lambda msg: msg.content_type == "text")
@@ -184,7 +152,8 @@ def handle_text(message):
         else:
             reply_text = raw_reply.strip()
 
-        safe_reply(message, reply_text, reply_markup=get_response_action_keyboard())
+        # Reply with pure text, no extra buttons underneath
+        safe_reply(message, reply_text)
     except Exception as e:
         print(f"Text Processing Error: {e}")
         safe_reply(message, f"⚠️ Error processing text: {e}")
@@ -196,7 +165,7 @@ def handle_photo(message):
     try:
         temp_path = save_telegram_file(message.photo[-1].file_id, ".jpg")
         caption = caption_image(temp_path).capitalize()
-        safe_reply(message, f"📸 <b>Image Description:</b>\n\n{caption}", reply_markup=get_main_menu_keyboard())
+        safe_reply(message, f"📸 <b>Image Description:</b>\n\n{caption}")
     except Exception as e:
         print(f"Photo Processing Error: {e}")
         safe_reply(message, f"⚠️ Error processing image: {e}")
@@ -212,7 +181,7 @@ def handle_audio(message):
         file_id = message.voice.file_id if message.voice else message.audio.file_id
         temp_path = save_telegram_file(file_id, ".ogg")
         result = hf_client.automatic_speech_recognition(temp_path, model=ASR_MODEL)
-        safe_reply(message, f"🎙️ <b>Transcription:</b>\n\n\"{result.text}\"", reply_markup=get_main_menu_keyboard())
+        safe_reply(message, f"🎙️ <b>Transcription:</b>\n\n\"{result.text}\"")
     except Exception as e:
         print(f"Audio Processing Error: {e}")
         safe_reply(message, f"⚠️ Error transcribing audio: {e}")
@@ -229,7 +198,7 @@ def handle_video(message):
         frame_path = extract_keyframe(video_path)
         if frame_path:
             caption = caption_image(frame_path).capitalize()
-            safe_reply(message, f"🎬 <b>Video Snapshot:</b>\n\n{caption}", reply_markup=get_main_menu_keyboard())
+            safe_reply(message, f"🎬 <b>Video Snapshot:</b>\n\n{caption}")
         else:
             safe_reply(message, "Unable to extract a keyframe from this video.")
     except Exception as e:
@@ -246,10 +215,10 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Telegram Bot with Interactive Keyboards is running!"
+    return "Telegram Bot is running!"
 
 def run_bot():
-    print("⚡ Starting Telegram Bot polling loop with Interactive UI...")
+    print("⚡ Starting Telegram Bot polling loop...")
     bot.infinity_polling(timeout=20, long_polling_timeout=5)
 
 if not hasattr(app, 'bot_started'):
