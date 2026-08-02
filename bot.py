@@ -1,4 +1,5 @@
 import os
+import base64
 import tempfile
 import threading
 import cv2
@@ -12,7 +13,21 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 # Initialize Telegram Bot and Hugging Face Client
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="Markdown")
-hf_client = InferenceClient(token=HF_TOKEN)
+
+# provider="auto" lets HF pick whichever enabled provider serves the model.
+# Make sure providers are enabled at https://huggingface.co/settings/inference-providers
+hf_client = InferenceClient(token=HF_TOKEN, provider="auto")
+
+# --- Model choices ---
+# These are models that are actually live on Inference Providers as of this
+# writing. If one of them stops working, check the model's page on
+# huggingface.co -> "Inference Providers" tab to see what's currently hosting
+# it, and update the provider/model below to match.
+CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                    # served by Together AI
+VISION_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct"  # served by Novita / Nscale
+VISION_PROVIDER = "novita"
+ASR_MODEL = "openai/whisper-large-v3"                      # served by fal-ai
+ASR_PROVIDER = "fal-ai"
 
 # --- Helper Functions ---
 def save_telegram_file(file_id, suffix):
@@ -27,17 +42,41 @@ def save_telegram_file(file_id, suffix):
 def extract_keyframe(video_path):
     """Extracts a middle frame from a video file."""
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened(): 
+    if not cap.isOpened():
         return None
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total_frames // 2))
     success, frame = cap.read()
     cap.release()
-    if not success: 
+    if not success:
         return None
     temp_frame = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
     cv2.imwrite(temp_frame.name, frame)
     return temp_frame.name
+
+def caption_image(image_path):
+    """Describes an image using a vision-capable chat model (replaces BLIP)."""
+    with open(image_path, "rb") as f:
+        b64_image = base64.b64encode(f.read()).decode("utf-8")
+
+    response = hf_client.chat_completion(
+        model=VISION_MODEL,
+        provider=VISION_PROVIDER,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image in one short sentence."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
+                    },
+                ],
+            }
+        ],
+        max_tokens=200,
+    )
+    return response.choices[0].message.content.strip()
 
 # --- Bot Handlers ---
 @bot.message_handler(commands=["start", "help"])
@@ -48,9 +87,8 @@ def handle_start(message):
 def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
-        # Using a supported free-tier model
         response = hf_client.chat_completion(
-            model="google/gemma-2-2b-it", 
+            model=CHAT_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -66,7 +104,7 @@ def handle_text(message):
             max_tokens=1000
         )
         raw_reply = response.choices[0].message.content
-        
+
         # Remove internal thinking block if present
         if "</think>" in raw_reply:
             reply_text = raw_reply.split("</think>")[-1].strip()
@@ -84,8 +122,7 @@ def handle_photo(message):
     temp_path = None
     try:
         temp_path = save_telegram_file(message.photo[-1].file_id, ".jpg")
-        result = hf_client.image_to_text(temp_path, model="Salesforce/blip-image-captioning-base")
-        caption = result[0]['generated_text'].capitalize() if isinstance(result, list) else str(result).capitalize()
+        caption = caption_image(temp_path).capitalize()
         bot.reply_to(message, f"📸 **Image Description:**\n{caption}")
     except Exception as e:
         print(f"Photo Processing Error: {e}")
@@ -101,7 +138,9 @@ def handle_audio(message):
     try:
         file_id = message.voice.file_id if message.voice else message.audio.file_id
         temp_path = save_telegram_file(file_id, ".ogg")
-        result = hf_client.automatic_speech_recognition(temp_path, model="openai/whisper-tiny")
+        result = hf_client.automatic_speech_recognition(
+            temp_path, model=ASR_MODEL, provider=ASR_PROVIDER
+        )
         bot.reply_to(message, f"🎙️ **Transcription:**\n\"{result.text}\"")
     except Exception as e:
         print(f"Audio Processing Error: {e}")
@@ -118,8 +157,7 @@ def handle_video(message):
         video_path = save_telegram_file(message.video.file_id, ".mp4")
         frame_path = extract_keyframe(video_path)
         if frame_path:
-            result = hf_client.image_to_text(frame_path, model="Salesforce/blip-image-captioning-base")
-            caption = result[0]['generated_text'].capitalize() if isinstance(result, list) else str(result).capitalize()
+            caption = caption_image(frame_path).capitalize()
             bot.reply_to(message, f"🎬 **Video Snapshot:**\n{caption}")
         else:
             bot.reply_to(message, "Unable to extract a keyframe from this video.")
