@@ -39,6 +39,20 @@ def save_telegram_file(file_id, suffix):
         f.write(file_bytes)
     return temp_file.name
 
+def safe_reply(message, text):
+    """
+    Replies with Markdown formatting, but falls back to plain text if the
+    text contains characters that break Telegram's Markdown parser (e.g.
+    unmatched *, _, [, ` from AI-generated content).
+    """
+    try:
+        bot.reply_to(message, text)
+    except telebot.apihelper.ApiTelegramException as e:
+        if "can't parse entities" in str(e):
+            bot.reply_to(message, text, parse_mode=None)
+        else:
+            raise
+
 def extract_keyframe(video_path):
     """Extracts a middle frame from a video file."""
     cap = cv2.VideoCapture(video_path)
@@ -81,7 +95,7 @@ def caption_image(image_path):
 # --- Bot Handlers ---
 @bot.message_handler(commands=["start", "help"])
 def handle_start(message):
-    bot.reply_to(message, "👋 Bot is online 24/7! Send me Text, Photo, Audio, or Video.")
+    safe_reply(message, "👋 Bot is online 24/7! Send me Text, Photo, Audio, or Video.")
 
 @bot.message_handler(func=lambda msg: msg.content_type == "text")
 def handle_text(message):
@@ -111,10 +125,10 @@ def handle_text(message):
         else:
             reply_text = raw_reply.strip()
 
-        bot.reply_to(message, reply_text)
+        safe_reply(message, reply_text)
     except Exception as e:
         print(f"Text Processing Error: {e}")
-        bot.reply_to(message, f"⚠️ Error processing text: {e}")
+        safe_reply(message, f"⚠️ Error processing text: {e}")
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
@@ -123,10 +137,10 @@ def handle_photo(message):
     try:
         temp_path = save_telegram_file(message.photo[-1].file_id, ".jpg")
         caption = caption_image(temp_path).capitalize()
-        bot.reply_to(message, f"📸 **Image Description:**\n{caption}")
+        safe_reply(message, f"📸 **Image Description:**\n{caption}")
     except Exception as e:
         print(f"Photo Processing Error: {e}")
-        bot.reply_to(message, f"⚠️ Error processing image: {e}")
+        safe_reply(message, f"⚠️ Error processing image: {e}")
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
@@ -141,10 +155,10 @@ def handle_audio(message):
         result = hf_client.automatic_speech_recognition(
             temp_path, model=ASR_MODEL, provider=ASR_PROVIDER
         )
-        bot.reply_to(message, f"🎙️ **Transcription:**\n\"{result.text}\"")
+        safe_reply(message, f"🎙️ **Transcription:**\n\"{result.text}\"")
     except Exception as e:
         print(f"Audio Processing Error: {e}")
-        bot.reply_to(message, f"⚠️ Error transcribing audio: {e}")
+        safe_reply(message, f"⚠️ Error transcribing audio: {e}")
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
@@ -158,12 +172,12 @@ def handle_video(message):
         frame_path = extract_keyframe(video_path)
         if frame_path:
             caption = caption_image(frame_path).capitalize()
-            bot.reply_to(message, f"🎬 **Video Snapshot:**\n{caption}")
+            safe_reply(message, f"🎬 **Video Snapshot:**\n{caption}")
         else:
-            bot.reply_to(message, "Unable to extract a keyframe from this video.")
+            safe_reply(message, "Unable to extract a keyframe from this video.")
     except Exception as e:
         print(f"Video Processing Error: {e}")
-        bot.reply_to(message, f"⚠️ Error processing video: {e}")
+        safe_reply(message, f"⚠️ Error processing video: {e}")
     finally:
         if video_path and os.path.exists(video_path):
             os.remove(video_path)
