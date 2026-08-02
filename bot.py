@@ -6,6 +6,7 @@ import tempfile
 import threading
 import cv2
 import telebot
+from telebot import types
 from flask import Flask
 from huggingface_hub import InferenceClient
 
@@ -13,32 +14,39 @@ from huggingface_hub import InferenceClient
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Initialize Telegram Bot and Hugging Face Client.
-# NOTE: no default parse_mode here. Telegram's legacy "Markdown" mode is very
-# strict (every *, _, [, ` must be perfectly paired) and AI-generated text
-# frequently breaks it, causing "can't parse entities" errors. We use HTML
-# mode instead, applied per-message via safe_reply(), which escapes text
-# first so it can never accidentally form invalid markup.
+# Initialize Telegram Bot
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
-# provider="auto" lets HF pick whichever enabled provider serves the model.
-# Make sure providers are enabled at https://huggingface.co/settings/inference-providers
+# Initialize Inference Client
 hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 
-# --- Model choices ---
-# These are models that are actually live on Inference Providers as of this
-# writing. If one of them stops working, check the model's page on
-# huggingface.co -> "Inference Providers" tab to see what's currently hosting
-# it, and update the provider/model below to match.
-CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                # served by Together AI
-VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"        # served by Novita / Nscale — dedicated vision model, more reliable than Kimi-K3 for simple image_url input
-ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"                      # served by DeepInfra
-# Note: provider is set once on the InferenceClient above (provider="auto").
-# Older huggingface_hub versions don't accept a per-call `provider=` kwarg on
-# chat_completion()/automatic_speech_recognition(), so we rely on "auto" to
-# pick the right one of your enabled providers for each model.
+# Models
+CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
+
+# --- UI Keyboards ---
+
+def get_main_menu_keyboard():
+    """Generates the interactive main menu inline keyboard."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_chat = types.InlineKeyboardButton("💬 Ask AI", callback_data="action_chat_help")
+    btn_vision = types.InlineKeyboardButton("📸 Vision & Image", callback_data="action_vision_help")
+    btn_audio = types.InlineKeyboardButton("🎙️ Audio Transcribe", callback_data="action_audio_help")
+    btn_video = types.InlineKeyboardButton("🎬 Video Keyframe", callback_data="action_video_help")
+    markup.add(btn_chat, btn_vision, btn_audio, btn_video)
+    return markup
+
+def get_response_action_keyboard():
+    """Appends quick-action buttons under AI responses."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_simplify = types.InlineKeyboardButton("💡 Simplify", callback_data="action_simplify")
+    btn_menu = types.InlineKeyboardButton("🏠 Main Menu", callback_data="action_main_menu")
+    markup.add(btn_simplify, btn_menu)
+    return markup
 
 # --- Helper Functions ---
+
 def save_telegram_file(file_id, suffix):
     """Downloads a file from Telegram servers to a local temporary file."""
     file_info = bot.get_file(file_id)
@@ -49,29 +57,18 @@ def save_telegram_file(file_id, suffix):
     return temp_file.name
 
 def markdown_to_safe_html(text):
-    """
-    Converts light **bold**/*bold* markdown into real <b> tags, and
-    HTML-escapes everything else first so the AI's text can never
-    accidentally produce broken or malicious markup.
-    """
+    """Safely escapes text and converts light bolding for Telegram HTML mode."""
     escaped = html.escape(text)
-    # Double-asterisk bold (most common LLM style)
     escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
-    # Leftover single-asterisk bold
     escaped = re.sub(r"\*(.+?)\*", r"<b>\1</b>", escaped)
     return escaped
 
-def safe_reply(message, text):
-    """
-    Replies with lightweight bold formatting via HTML (which Telegram
-    parses far more forgivingly than Markdown). Falls back to plain,
-    unformatted text if anything still goes wrong, so a reply is never
-    silently lost.
-    """
+def safe_reply(message, text, reply_markup=None):
+    """Replies safely using HTML parsing with optional inline keyboards."""
     try:
-        bot.reply_to(message, markdown_to_safe_html(text), parse_mode="HTML")
+        return bot.reply_to(message, markdown_to_safe_html(text), parse_mode="HTML", reply_markup=reply_markup)
     except telebot.apihelper.ApiTelegramException:
-        bot.reply_to(message, text, parse_mode=None)
+        return bot.reply_to(message, text, parse_mode=None, reply_markup=reply_markup)
 
 def extract_keyframe(video_path):
     """Extracts a middle frame from a video file."""
@@ -89,7 +86,7 @@ def extract_keyframe(video_path):
     return temp_frame.name
 
 def caption_image(image_path):
-    """Describes an image using a vision-capable chat model (replaces BLIP)."""
+    """Describes an image using a robust vision model."""
     with open(image_path, "rb") as f:
         b64_image = base64.b64encode(f.read()).decode("utf-8")
 
@@ -111,10 +108,58 @@ def caption_image(image_path):
     )
     return response.choices[0].message.content.strip()
 
-# --- Bot Handlers ---
-@bot.message_handler(commands=["start", "help"])
+# --- Bot Command Handlers ---
+
+@bot.message_handler(commands=["start", "help", "menu"])
 def handle_start(message):
-    safe_reply(message, "👋 Bot is online 24/7! Send me Text, Photo, Audio, or Video.")
+    welcome_text = (
+        "🤖 <b>Welcome to FlowMind AI!</b>\n\n"
+        "I can process text, analyze photos, transcribe audio, and inspect video keyframes.\n\n"
+        "Tap an option below to get started, or just send me a message directly!"
+    )
+    safe_reply(message, welcome_text, reply_markup=get_main_menu_keyboard())
+
+# --- Callback Query Handler (Interactive Button Presses) ---
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback_query(call):
+    # Send quick toast notification in Telegram UI
+    bot.answer_callback_query(call.id)
+
+    if call.data == "action_main_menu":
+        bot.send_message(
+            call.message.chat.id, 
+            "🏠 <b>Main Menu</b>\nSelect an option below:", 
+            parse_mode="HTML", 
+            reply_markup=get_main_menu_keyboard()
+        )
+    elif call.data == "action_chat_help":
+        safe_reply(call.message, "💬 <b>AI Chat:</b> Type any prompt or question in the chat, and I'll respond instantly!")
+    elif call.data == "action_vision_help":
+        safe_reply(call.message, "📸 <b>Vision Mode:</b> Send or forward any photo, and I'll generate a description for you.")
+    elif call.data == "action_audio_help":
+        safe_reply(call.message, "🎙️ <b>Speech-to-Text:</b> Send a voice note or audio file, and I will transcribe it.")
+    elif call.data == "action_video_help":
+        safe_reply(call.message, "🎬 <b>Video Analysis:</b> Send a short video clip, and I will extract and describe a keyframe.")
+    elif call.data == "action_simplify":
+        # Extract previous message text and simplify
+        if call.message.reply_to_message and call.message.reply_to_message.text:
+            original_prompt = call.message.reply_to_message.text
+            bot.send_chat_action(call.message.chat.id, "typing")
+            try:
+                response = hf_client.chat_completion(
+                    model=CHAT_MODEL,
+                    messages=[
+                        {"role": "system", "content": "Explain the following topic in simple terms for a 10-year-old using bullet points and emojis."},
+                        {"role": "user", "content": original_prompt}
+                    ],
+                    max_tokens=500
+                )
+                safe_reply(call.message, f"💡 <b>Simplified Explanation:</b>\n\n{response.choices[0].message.content.strip()}", reply_markup=get_response_action_keyboard())
+            except Exception as e:
+                safe_reply(call.message, f"⚠️ Error simplifying text: {e}")
+
+# --- Content Handlers ---
 
 @bot.message_handler(func=lambda msg: msg.content_type == "text")
 def handle_text(message):
@@ -138,13 +183,13 @@ def handle_text(message):
         )
         raw_reply = response.choices[0].message.content
 
-        # Remove internal thinking block if present
         if "</think>" in raw_reply:
             reply_text = raw_reply.split("</think>")[-1].strip()
         else:
             reply_text = raw_reply.strip()
 
-        safe_reply(message, reply_text)
+        # Reply with content AND attach quick action buttons
+        safe_reply(message, reply_text, reply_markup=get_response_action_keyboard())
     except Exception as e:
         print(f"Text Processing Error: {e}")
         safe_reply(message, f"⚠️ Error processing text: {e}")
@@ -156,7 +201,7 @@ def handle_photo(message):
     try:
         temp_path = save_telegram_file(message.photo[-1].file_id, ".jpg")
         caption = caption_image(temp_path).capitalize()
-        safe_reply(message, f"📸 **Image Description:**\n{caption}")
+        safe_reply(message, f"📸 <b>Image Description:</b>\n\n{caption}", reply_markup=get_main_menu_keyboard())
     except Exception as e:
         print(f"Photo Processing Error: {e}")
         safe_reply(message, f"⚠️ Error processing image: {e}")
@@ -172,7 +217,7 @@ def handle_audio(message):
         file_id = message.voice.file_id if message.voice else message.audio.file_id
         temp_path = save_telegram_file(file_id, ".ogg")
         result = hf_client.automatic_speech_recognition(temp_path, model=ASR_MODEL)
-        safe_reply(message, f"🎙️ **Transcription:**\n\"{result.text}\"")
+        safe_reply(message, f"🎙️ <b>Transcription:</b>\n\n\"{result.text}\"", reply_markup=get_main_menu_keyboard())
     except Exception as e:
         print(f"Audio Processing Error: {e}")
         safe_reply(message, f"⚠️ Error transcribing audio: {e}")
@@ -189,7 +234,7 @@ def handle_video(message):
         frame_path = extract_keyframe(video_path)
         if frame_path:
             caption = caption_image(frame_path).capitalize()
-            safe_reply(message, f"🎬 **Video Snapshot:**\n{caption}")
+            safe_reply(message, f"🎬 <b>Video Snapshot:</b>\n\n{caption}", reply_markup=get_main_menu_keyboard())
         else:
             safe_reply(message, "Unable to extract a keyframe from this video.")
     except Exception as e:
@@ -206,13 +251,12 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Telegram Bot is running!"
+    return "Telegram Bot with Interactive Keyboards is running!"
 
 def run_bot():
-    print("⚡ Starting Telegram Bot polling loop...")
+    print("⚡ Starting Telegram Bot polling loop with Interactive UI...")
     bot.infinity_polling(timeout=20, long_polling_timeout=5)
 
-# Guard against duplicate polling threads started by Gunicorn workers
 if not hasattr(app, 'bot_started'):
     app.bot_started = True
     bot_thread = threading.Thread(target=run_bot, daemon=True)
