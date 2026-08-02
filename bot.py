@@ -1,5 +1,7 @@
 import os
 import base64
+import html
+import re
 import tempfile
 import threading
 import cv2
@@ -11,8 +13,13 @@ from huggingface_hub import InferenceClient
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Initialize Telegram Bot and Hugging Face Client
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="Markdown")
+# Initialize Telegram Bot and Hugging Face Client.
+# NOTE: no default parse_mode here. Telegram's legacy "Markdown" mode is very
+# strict (every *, _, [, ` must be perfectly paired) and AI-generated text
+# frequently breaks it, causing "can't parse entities" errors. We use HTML
+# mode instead, applied per-message via safe_reply(), which escapes text
+# first so it can never accidentally form invalid markup.
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
 # provider="auto" lets HF pick whichever enabled provider serves the model.
 # Make sure providers are enabled at https://huggingface.co/settings/inference-providers
@@ -39,19 +46,30 @@ def save_telegram_file(file_id, suffix):
         f.write(file_bytes)
     return temp_file.name
 
+def markdown_to_safe_html(text):
+    """
+    Converts light **bold**/*bold* markdown into real <b> tags, and
+    HTML-escapes everything else first so the AI's text can never
+    accidentally produce broken or malicious markup.
+    """
+    escaped = html.escape(text)
+    # Double-asterisk bold (most common LLM style)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    # Leftover single-asterisk bold
+    escaped = re.sub(r"\*(.+?)\*", r"<b>\1</b>", escaped)
+    return escaped
+
 def safe_reply(message, text):
     """
-    Replies with Markdown formatting, but falls back to plain text if the
-    text contains characters that break Telegram's Markdown parser (e.g.
-    unmatched *, _, [, ` from AI-generated content).
+    Replies with lightweight bold formatting via HTML (which Telegram
+    parses far more forgivingly than Markdown). Falls back to plain,
+    unformatted text if anything still goes wrong, so a reply is never
+    silently lost.
     """
     try:
-        bot.reply_to(message, text)
-    except telebot.apihelper.ApiTelegramException as e:
-        if "can't parse entities" in str(e):
-            bot.reply_to(message, text, parse_mode=None)
-        else:
-            raise
+        bot.reply_to(message, markdown_to_safe_html(text), parse_mode="HTML")
+    except telebot.apihelper.ApiTelegramException:
+        bot.reply_to(message, text, parse_mode=None)
 
 def extract_keyframe(video_path):
     """Extracts a middle frame from a video file."""
