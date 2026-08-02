@@ -18,10 +18,12 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
 # Initialize Inference Client
-hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
+# We remove 'provider="auto"' to use the default hf-inference tier which 
+# guarantees support for the specific model below.
+hf_client = InferenceClient(token=HF_TOKEN, timeout=120)
 
-# Models
-CHAT_MODEL = "google/gemma-2-2b-it"
+# Models - Verified for the free serverless tier
+CHAT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
