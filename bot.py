@@ -21,7 +21,7 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 
 # Models
-CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+CHAT_MODEL = "google/gemma-2-2b-it"
 VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
