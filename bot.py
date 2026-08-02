@@ -18,17 +18,18 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
 # Initialize Inference Client
-# We remove 'provider="auto"' to use the default hf-inference tier which 
-# guarantees support for the specific model below.
-hf_client = InferenceClient(token=HF_TOKEN, timeout=120)
+# provider="auto" is required here so Hugging Face can find a provider for Audio tasks, 
+# since Groq does not support Speech-to-Text via the router.
+hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 
-# Models - Verified for the free serverless tier
-CHAT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
-VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+# --- Verified Models ---
+# We append ':groq' to force these specific models to use your Groq integration.
+CHAT_MODEL = "openai/gpt-oss-120b:groq" 
+VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct:groq"
+# We leave ASR (Audio) as is, so the 'auto' provider router can find a working host (e.g., DeepInfra).
 ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
 # --- UI Keyboards ---
-
 def get_main_menu_keyboard():
     """Generates the interactive main menu inline keyboard."""
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -48,7 +49,6 @@ def get_response_action_keyboard():
     return markup
 
 # --- Helper Functions ---
-
 def save_telegram_file(file_id, suffix):
     """Downloads a file from Telegram servers to a local temporary file."""
     file_info = bot.get_file(file_id)
@@ -88,7 +88,7 @@ def extract_keyframe(video_path):
     return temp_frame.name
 
 def caption_image(image_path):
-    """Describes an image using a robust vision model."""
+    """Describes an image using a robust vision model on Groq."""
     with open(image_path, "rb") as f:
         b64_image = base64.b64encode(f.read()).decode("utf-8")
 
@@ -111,7 +111,6 @@ def caption_image(image_path):
     return response.choices[0].message.content.strip()
 
 # --- Bot Command Handlers ---
-
 @bot.message_handler(commands=["start", "help", "menu"])
 def handle_start(message):
     welcome_text = (
@@ -122,10 +121,8 @@ def handle_start(message):
     safe_reply(message, welcome_text, reply_markup=get_main_menu_keyboard())
 
 # --- Callback Query Handler (Interactive Button Presses) ---
-
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
-    # Send quick toast notification in Telegram UI
     bot.answer_callback_query(call.id)
 
     if call.data == "action_main_menu":
@@ -144,7 +141,6 @@ def handle_callback_query(call):
     elif call.data == "action_video_help":
         safe_reply(call.message, "🎬 <b>Video Analysis:</b> Send a short video clip, and I will extract and describe a keyframe.")
     elif call.data == "action_simplify":
-        # Extract previous message text and simplify
         if call.message.reply_to_message and call.message.reply_to_message.text:
             original_prompt = call.message.reply_to_message.text
             bot.send_chat_action(call.message.chat.id, "typing")
@@ -162,7 +158,6 @@ def handle_callback_query(call):
                 safe_reply(call.message, f"⚠️ Error simplifying text: {e}")
 
 # --- Content Handlers ---
-
 @bot.message_handler(func=lambda msg: msg.content_type == "text")
 def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
@@ -190,7 +185,6 @@ def handle_text(message):
         else:
             reply_text = raw_reply.strip()
 
-        # Reply with content AND attach quick action buttons
         safe_reply(message, reply_text, reply_markup=get_response_action_keyboard())
     except Exception as e:
         print(f"Text Processing Error: {e}")
