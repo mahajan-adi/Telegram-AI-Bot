@@ -48,14 +48,28 @@ def handle_start(message):
 def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
+        # Using a supported model and specifying a provider for the Serverless API
         response = hf_client.chat_completion(
-            model="Qwen/Qwen3-4B-Thinking-2507",
-            messages=[{"role": "user", "content": message.text}],
+            model="Qwen/Qwen2.5-7B-Instruct",
+            # We add provider="together" to ensure it routes correctly through the free inference tier
+            provider="together", 
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful AI assistant in a Telegram chat. "
+                        "Telegram does not support Markdown tables or '###' headers. "
+                        "Never use tables or '###' headers in your response. "
+                        "Instead, format your response using bullet points, bold text (*word*), and emojis to keep it clean and scannable."
+                    )
+                },
+                {"role": "user", "content": message.text}
+            ],
             max_tokens=1000
         )
         raw_reply = response.choices[0].message.content
         
-        # Remove the internal thinking block if present
+        # Remove internal thinking block if present (just in case the model outputs it)
         if "</think>" in raw_reply:
             reply_text = raw_reply.split("</think>")[-1].strip()
         else:
