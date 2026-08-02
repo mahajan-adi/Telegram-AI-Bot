@@ -31,7 +31,7 @@ hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 # huggingface.co -> "Inference Providers" tab to see what's currently hosting
 # it, and update the provider/model below to match.
 CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"                # served by Together AI
-VISION_MODEL = "moonshotai/Kimi-K3"                    # served by Together AI (note: very large model, expect slower responses)
+VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"        # served by Novita / Nscale — dedicated vision model, more reliable than Kimi-K3 for simple image_url input
 ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"                      # served by DeepInfra
 # Note: provider is set once on the InferenceClient above (provider="auto").
 # Older huggingface_hub versions don't accept a per-call `provider=` kwarg on
