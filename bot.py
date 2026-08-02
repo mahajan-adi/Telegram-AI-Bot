@@ -6,11 +6,11 @@ import telebot
 from flask import Flask
 from huggingface_hub import InferenceClient
 
-# Tokens - Configured via Render Environment Variables
+# Tokens - Read from Render Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Initialize Telegram Bot and HF Client
+# Initialize Telegram Bot and Hugging Face Client
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="Markdown")
 hf_client = InferenceClient(token=HF_TOKEN)
 
@@ -51,9 +51,16 @@ def handle_text(message):
         response = hf_client.chat_completion(
             model="Qwen/Qwen3-4B-Thinking-2507",
             messages=[{"role": "user", "content": message.text}],
-            max_tokens=1000  # Increased to prevent responses cutting off mid-sentence
+            max_tokens=1000
         )
-        reply_text = response.choices[0].message.content
+        raw_reply = response.choices[0].message.content
+        
+        # Remove the internal thinking block if present
+        if "</think>" in raw_reply:
+            reply_text = raw_reply.split("</think>")[-1].strip()
+        else:
+            reply_text = raw_reply.strip()
+
         bot.reply_to(message, reply_text)
     except Exception as e:
         print(f"Text Processing Error: {e}")
@@ -124,7 +131,7 @@ def run_bot():
     print("⚡ Starting Telegram Bot polling loop...")
     bot.infinity_polling(timeout=20, long_polling_timeout=5)
 
-# Guard against duplicate threads created by Gunicorn worker processes
+# Guard against duplicate polling threads started by Gunicorn workers
 if not hasattr(app, 'bot_started'):
     app.bot_started = True
     bot_thread = threading.Thread(target=run_bot, daemon=True)
