@@ -49,7 +49,7 @@ def handle_text(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
         response = hf_client.chat_completion(
-            model="Qwen/Qwen2.5-1.5B-Instruct",
+            model="Qwen/Qwen3-4B-Thinking-2507",
             messages=[{"role": "user", "content": message.text}],
             max_tokens=1000  # Increased to prevent responses cutting off mid-sentence
         )
