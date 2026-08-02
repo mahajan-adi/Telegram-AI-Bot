@@ -10,23 +10,20 @@ from telebot import types
 from flask import Flask
 from huggingface_hub import InferenceClient
 
-# Tokens - Read from Render Environment Variables
+# --- Tokens --- Read from Render Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Initialize Telegram Bot
+# --- Initialization ---
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
-# Initialize Inference Client
 # provider="auto" is required here so Hugging Face can find a provider for Audio tasks, 
-# since Groq does not support Speech-to-Text via the router.
+# while we force Groq for text and vision using the :groq suffix below.
 hf_client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=120)
 
 # --- Verified Models ---
-# We append ':groq' to force these specific models to use your Groq integration.
 CHAT_MODEL = "openai/gpt-oss-120b:groq" 
 VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct:groq"
-# We leave ASR (Audio) as is, so the 'auto' provider router can find a working host (e.g., DeepInfra).
 ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
 # --- UI Keyboards ---
@@ -123,6 +120,7 @@ def handle_start(message):
 # --- Callback Query Handler (Interactive Button Presses) ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
+    # Acknowledge the callback to remove the loading spinner
     bot.answer_callback_query(call.id)
 
     if call.data == "action_main_menu":
@@ -141,15 +139,16 @@ def handle_callback_query(call):
     elif call.data == "action_video_help":
         safe_reply(call.message, "🎬 <b>Video Analysis:</b> Send a short video clip, and I will extract and describe a keyframe.")
     elif call.data == "action_simplify":
-        if call.message.reply_to_message and call.message.reply_to_message.text:
-            original_prompt = call.message.reply_to_message.text
+        # Extract the text from the bot's own message that the button was attached to
+        if call.message and call.message.text:
+            text_to_simplify = call.message.text
             bot.send_chat_action(call.message.chat.id, "typing")
             try:
                 response = hf_client.chat_completion(
                     model=CHAT_MODEL,
                     messages=[
                         {"role": "system", "content": "Explain the following topic in simple terms for a 10-year-old using bullet points and emojis."},
-                        {"role": "user", "content": original_prompt}
+                        {"role": "user", "content": text_to_simplify}
                     ],
                     max_tokens=500
                 )
